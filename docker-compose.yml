@@ -1,0 +1,72 @@
+services:
+  # PostgreSQL Database
+  inventree-db:
+    image: postgres:16
+    container_name: inventree-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${INVENTREE_DB_USER}
+      - POSTGRES_PASSWORD=${INVENTREE_DB_PASSWORD}
+      - POSTGRES_DB=${INVENTREE_DB_NAME}
+    volumes:
+      - ${INVENTREE_EXT_VOLUME}/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTREE_DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  inventree-cache:
+    image: redis:7-alpine
+    container_name: inventree-cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # InvenTree Webserver
+  inventree-server:
+    image: inventree/inventree:${INVENTREE_TAG}
+    container_name: inventree-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ${INVENTREE_EXT_VOLUME}:/home/inventree/data
+    depends_on:
+      inventree-db:
+        condition: service_healthy
+      inventree-cache:
+        condition: service_healthy
+
+  # InvenTree Achtergrond-worker 
+  inventree-worker:
+    image: inventree/inventree:${INVENTREE_TAG}
+    container_name: inventree-worker
+    command: invoke worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ${INVENTREE_EXT_VOLUME}:/home/inventree/data
+    depends_on:
+      - inventree-server
+
+  # Caddy Reverse Proxy 
+  inventree-proxy:
+    image: caddy:2-alpine
+    container_name: inventree-proxy
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    environment:
+      - INVENTREE_SITE_URL=${INVENTREE_SITE_URL}
+    volumes:
+      - ${INVENTREE_EXT_VOLUME}/static:/var/www/static:ro
+      - ${INVENTREE_EXT_VOLUME}/media:/var/www/media:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - inventree-server
