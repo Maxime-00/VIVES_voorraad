@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="nl"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIVES · Materiaal aanvullen</title>
+<style>
+body{margin:0;background:#f3f5f7;color:#172c3e;font:18px system-ui}header{background:#172c3e;color:white;padding:24px;font-weight:700;letter-spacing:.06em}main{max-width:480px;margin:30px auto;padding:24px}article{background:white;border-radius:18px;padding:28px;box-shadow:0 6px 30px #172c3e12}small{color:#526578}h1{font-size:30px}dl{display:grid;grid-template-columns:1fr 1fr;gap:16px}dd{margin:0;font-weight:700}button{width:100%;padding:18px;border:0;border-radius:10px;background:#b20d3a;color:white;font:700 18px system-ui;cursor:pointer}button:disabled{background:#687786}#status{line-height:1.6}a{color:inherit}
+</style><header>VIVES TECHNOLOGIE</header><main><small>MATERIAAL · B303</small><h1>Materiaal aanvullen</h1><article><h2 id="name">Onderdeel laden…</h2><p id="description"></p><dl><dt>Farnell-SKU</dt><dd id="sku">—</dd><dt>Aantal</dt><dd id="quantity">—</dd><dt>Bestellijst</dt><dd id="po">—</dd></dl><p id="mode"></p><button id="confirm" disabled>Aanvulling aanvragen</button><p id="status" role="status" aria-live="polite">Scannen registreert nog geen aanvraag.</p></article></main>
+<script>
+const ipn=location.pathname.split('/').pop(), endpoint='/api/onderdeel/'+encodeURIComponent(ipn), button=document.querySelector('#confirm'), status=document.querySelector('#status');
+async function call(url,options){const r=await fetch(url,options);const data=await r.json();if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:'De aanvraag kon niet worden verwerkt.');return data;}
+call(endpoint).then(d=>{for(const k of ['name','description','sku','quantity'])document.getElementById(k).textContent=d[k];document.querySelector('#po').textContent=d.reference;document.querySelector('#mode').textContent=d.dry_run?'Testmodus: bevestigen maakt geen bestelregel aan.':'Bevestigen voegt een aanvraag toe aan de interne bestellijst.';button.disabled=false;}).catch(e=>status.textContent=e.message);
+button.onclick=async()=>{button.disabled=true;status.textContent='Aanvraag verwerken…';try{const d=await call(endpoint+'/aanvragen',{method:'POST',headers:{'X-QR-Confirm':'yes'}});status.textContent=d.message;}catch(e){status.textContent=e.message+' Herlaad de pagina om de actuele status te bekijken.';}};
+</script></html>
