@@ -1,5 +1,13 @@
-﻿# VIVES_voorraad
+# VIVES_voorraad
 Project voor Netwerk Experience '26-'27
+
+## QR-bestelautomatisering (FastAPI)
+
+Zie [installatie, dry-run, QR-code en live-testprocedure](docs/qr_order_system.md).
+De nieuwe app gebruikt IPN-URLs en vraagt expliciete bevestiging. Standaard wordt
+niets naar InvenTree geschreven. De bestaande Flask-route wordt niet gebruikt.
+Voor de voorbereide Docker/HTTPS-uitrol zonder bestaande services te herstarten:
+[VM-dry-runprocedure](docs/qr_vm_dry_run.md).
 
 ## Documentatie
 
