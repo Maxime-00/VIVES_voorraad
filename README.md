@@ -1,175 +1,78 @@
 # VIVES_voorraad
+Project voor Netwerk Experience '26-'27
 
-Voorraadbeheer-systeem voor **Netwerk Experience '26-'27**, gebouwd op [InvenTree](https://inventree.org) en gedocumenteerd in dit project. De toepassing draait volledig in Docker-containers en is bereikbaar op het lokale netwerk.
+## Componentenimport B303
 
-## Architectuur
+Bij API-fouten toont het script de methode, het endpoint, de HTTP-status en een
+vaste, veilige classificatie van de response. Met `--verbose` zie je ook geslaagde
+requests. Headers, tokens, willekeurige querywaarden en ruwe response-inhoud
+worden nooit gelogd. Alleen numerieke paginatieparameters worden zichtbaar gemaakt.
+Een GET verstuurt geen body en geen Content-Type-header.
 
-```mermaid
-graph LR
-    A["Telefoons / apparaten<br/>lokaal Wi-Fi-netwerk"] -->|Poort 8000| B
-    B["inventree-proxy<br/>(Caddy, poort 80)"] -->|reverse proxy| C
-    C["inventree-server<br/>(InvenTree webserver)"]
-    C --> D["inventree-db<br/>(PostgreSQL 16)"]
-    C --> E["inventree-cache<br/>(Redis 7)"]
-    F["inventree-worker<br/>(achtergrondtaken)"] --> D
-    F --> E
-```
+Ook InvenTree v2-tokens gebruiken `Authorization: Token <volledig token>`:
+zet in `.env` alleen het volledige token, zonder `Token `-prefix. Het script kapt
+tokens niet af en converteert ze niet. Zie de officiële
+[authenticatiedocumentatie](https://docs.inventree.org/en/stable/api/).
+Een HTTP 400 is op zichzelf onvoldoende om authenticatie, Host-validatie of
+queryvalidatie als oorzaak aan te wijzen; gebruik de nieuwe foutmelding.
 
-### Diensten
-
-| Service            | Image                        | Functie                                               |
-| ------------------ | ---------------------------- | ----------------------------------------------------- |
-| `inventree-db`     | `postgres:16`                | Relatie-database voor InvenTree                       |
-| `inventree-cache`  | `redis:7-alpine`             | Cache                                                 |
-| `inventree-server` | `inventree/inventree:stable` | InvenTree webserver                                   |
-| `inventree-worker` | `inventree/inventree:stable` | Achtergrond-worker (`invoke worker`)                  |
-| `inventree-proxy`  | `caddy:2-alpine`             | Reverse proxy, publiceert poort **8000** op de host   |
-
-### Data
-
-Alle persistente data (database, media, statische bestanden, logs) ligt in één volume:
-
-```
-/opt/inventree/data        (INVENTREE_EXT_VOLUME)
-├── pgdata/                → PostgreSQL-data
-├── static/                → statische bestanden
-├── media/                 → media-bestanden
-└── ...
-```
-
-## Verplichte vereisten
-
-- Een server met een **statisch IP-adres** op het lokale netwerk (bijv. `10.20.225.77`)
-- [Docker](https://docs.docker.com/get-docker/) en Docker Compose geïnstalleerd op de server
-- Firewallregels die **poort 8000** openzetten voor lokaal netwerkverkeer
-
-## Opstarten
-
-1. De repository klonen naar de server:
-
-   ```bash
-   git clone <repo-url> && cd VIVES_voorraad
-   ```
-
-2. Het `.env`-bestand aanmaken op basis van het template hieronder (`cp .env.example .env`) en de waarden aanpassen.
-
-3. De containers starten:
-
-   ```bash
-   docker compose up -d
-   ```
-
-4. Status controleren:
-
-   ```bash
-   docker compose ps
-   docker compose logs -f inventree-server
-   ```
-
-## Configuratie
-
-### `.env`
-
-De `.env` is opgenomen in de `.gitignore` omdat die gevoelige gegevens bevat. Template:
-
-```ini
---- Algemene instellingen ---
-# Docker-image tag van InvenTree
-INVENTREE_TAG=stable
-# Pad waar de persistente data op de host ligt
-INVENTREE_EXT_VOLUME=/opt/inventree/data
-# Externe URL van de server (IP + poort) → bepaalt ook de Base URL
-INVENTREE_SITE_URL=http://10.20.225.77:8000/
-INVENTREE_LOG_LEVEL=WARNING
-INVENTREE_DEBUG=False
-
---- Database instellingen ---
-INVENTREE_DB_ENGINE=postgresql
-INVENTREE_DB_NAME=inventree
-INVENTREE_DB_USER=pguser
-INVENTREE_DB_PASSWORD=<sterk-wachtwoord>
-INVENTREE_DB_HOST=inventree-db
-INVENTREE_DB_PORT=5432
-
---- Cache (Redis) instellingen ---
-INVENTREE_CACHE_HOST=inventree-cache
-INVENTREE_CACHE_PORT=6379
-
---- Beheerder ---
-INVENTREE_ADMIN_USER=admin
-INVENTREE_ADMIN_PASSWORD=<sterk-wachtwoord>
-INVENTREE_ADMIN_EMAIL=<beheerders-e-mail>
-```
-
-| Variabele            | Omschrijving                                                                                                                                          |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `INVENTREE_TAG`      | Image-tag van InvenTree (standaard: `stable`)                                                                                                         |
-| `INVENTREE_EXT_VOLUME` | Host-pad voor alle persistente data                                                                                                                |
-| `INVENTREE_SITE_URL` | URL waarmee de server extern bereikbaar is. Dit **vergrendelt** de globale Base URL-instelling in InvenTree op dezelfde waarde                         |
-| `INVENTREE_ADMIN_*`  | Inloggegevens van de eerste beheerder (wordt alleen aangemaakt bij de eerste start)                                                                    |
-| `INVENTREE_DB_*`     | Verbinding met de PostgreSQL-container                                                                                                                |
-| `INVENTREE_CACHE_*`  | Verbinding met de Redis-container                                                                                                                     |
-
-### Netwerk en poorten
-
-| Niveau                    | Poort | Uitleg                                                                   |
-| ------------------------- | ----- | ------------------------------------------------------------------------ |
-| Host (buiten)             | 8000  | Gepubliceerd door `inventree-proxy`, bereikbaar voor het lokaal netwerk   |
-| Caddy-container           | 80    | Intern, proxy luistert hierop                                            |
-| InvenTree-server          | 8000  | Intern, gunicorn luistert hierop                                         |
-
-In de `Caddyfile` wordt alles op poort 80 geëindigd: `/static/*` en `/media/*` worden rechtstreeks geserveerd vanuit de mounted volumes, alles andere wordt doorgestuurd naar `inventree-server:8000`.
-
-### Base URL in InvenTree
-
-De **Base URL** (globale instelling `INVENTREE_BASE_URL`) wordt automatisch afgeleid van `INVENTREE_SITE_URL` en is daarom in de UI read-only:
-
-- `INVENTREE_SITE_URL=http://10.20.225.77:8000/` → Base URL `http://10.20.225.77:8000`
-- Om de Base URL te veranderen: `INVENTREE_SITE_URL` aanpassen in `.env` en de containers herstarten met `docker compose up -d`.
-
-## Toegang
-
-- **Web-UI:** `http://10.20.225.77:8000` (of het IP van de server)
-- **Inloggen:** met de beheerdersgebruikersnaam en -wachtwoord uit `INVENTREE_ADMIN_USER` / `INVENTREE_ADMIN_PASSWORD`
-- **API:** `http://10.20.225.77:8000/api/` (bijv. versie-info op `GET /api/`)
-
-> Apparaten op het lokale Wi-Fi-netwerk kunnen direct verbinding maken; voor externe toegang moeten de poort en firewall apart geconfigureerd worden.
-
-## Handige commands
+Python 3.10 of hoger. Er zijn geen externe Python-packages nodig.
 
 ```bash
-# Containers (her)starten
-docker compose up -d
-
-# Alle containers stoppen
-docker compose down
-
-# Logs van een specifieke dienst
-docker compose logs -f inventree-server
-
-# In de InvenTree-cli stappen (bijv. settings)
-docker compose exec inventree-server inventree shell
-
-# Update naar nieuwere InvenTree (na INVENTREE_TAG wijzigen)
-docker compose pull && docker compose up -d
+python -m venv .venv
+python -m pip install -r requirements.txt
 ```
 
-## Troubleshooting
+Kopieer `.env.example` naar `.env` en vul `INVENTREE_SITE_URL` (VM-URL) en
+`INVENTREE_API_TOKEN` in. Als `.env` al bestaat voor Docker, voeg alleen deze
+twee variabelen toe: overschrijf de bestaande instellingen niet. Omgevingsvariabelen
+hebben voorrang op `.env`. Gebruik HTTPS voor de tokenverbinding buiten een vertrouwd netwerk.
 
-| Symptoom                                    | Oorzaak / oplossing                                                                |
-| ------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Apparaten komen niet op poort 8000 binnen   | Firewall van de server: poort 8000 openzetten voor lokaal netwerkverkeer           |
-| "Site URL is locked by configuration"       | Base URL volgt `INVENTREE_SITE_URL` uit `.env` — daar wijzigen, niet in de UI      |
-| Server start niet na wijziging `.env`       | `docker compose up -d` opnieuw draaien zodat de nieuwe env vars geladen worden     |
-| Oude versie na `docker compose pull`        | Oud image verwijderen met `docker image prune` en opnieuw opstarten                |
-
-## Bestanden
-
+```bash
+# Zonder VM: planning tegen een lege catalogus, geen databasecontrole
+python scripts/import_components.py --offline --limit 2
+# Met VM: alleen GET/OPTIONS, standaard geen wijzigingen
+python scripts/import_components.py --limit 2
+python scripts/import_components.py --limit 2 --verbose
+# Alleen na expliciete toestemming voor databasewijzigingen:
+python scripts/import_components.py --apply --limit 2
+python scripts/import_components.py --apply
+python -m unittest discover -s tests -v
 ```
-VIVES_voorraad/
-├── Caddyfile          # Config van de Caddy reverse proxy
-├── docker-compose.yml # Definitie van alle diensten
-├── .env.example       # Template voor .env (mag wel in git)
-├── .env               # Lokaal config-bestand (niet in git, bevat geheimen)
-└── README.md          # Dit bestand
-```
+
+Met `--csv pad/naar/catalogus.csv` kan een ander lokaal worden geïmporteerd.
+De volledige CSV wordt gevalideerd vóór `--limit` wordt toegepast.
+UTF-8, komma als scheidingsteken; SKU en IPN blijven tekst. De tien Parts
+worden onder Electronics aangemaakt. Farnell is een actieve Company met
+`is_supplier=true`; alleen geverifieerde SKU's krijgen een SupplierPart.
+Fabrikant/MPN blijven in de CSV en in de SupplierPart-beschrijving bewaard.
+Er worden geen aparte ManufacturerParts aangemaakt.
+
+Identiteit: Part op IPN, categorie op naam + parent, Company op naam
+(hoofdletterongevoelig), SupplierPart op supplier + SKU. Bestaande records worden
+hergebruikt; dubbele matches of conflicterende koppelingen stoppen de import.
+Het script werkt bestaande beschrijvingen en productgegevens niet automatisch bij.
+Ontbrekende SKU's worden overgeslagen, terwijl de Part wel wordt aangemaakt.
+Alle lijstpagina's worden opgehaald om duplicaten buiten de eerste pagina te vinden.
+
+De importer verwacht API-versie 570 en controleert vóór de import de POST-velden
+via OPTIONS. Het OpenAPI-schema van jullie installatie moet nog worden gecontroleerd
+op `/api/schema/` (eventueel via de interactieve documentatie van de VM).
+Deze checkout bevat geen VM-URL/token of geëxporteerd schema; een live dry-run
+en exacte v570-verificatie zijn daarom nog niet uitgevoerd. De openbare
+[InvenTree API-documentatie](https://docs.inventree.org/en/stable/api/schema/company/)
+is als referentie gebruikt, niet als bewijs van de geïnstalleerde versie.
+
+Voer één importer tegelijk uit. De API-aanroepen vormen geen database-transactie:
+bij een fout kunnen eerdere records al bestaan. Herstarten hergebruikt die records.
+POST-aanroepen worden niet automatisch opnieuw geprobeerd. Bij een timeout eerst
+een dry-run uitvoeren om de serverstatus te controleren. Fouten geven exitcode 1.
+Voorraad, Purchase Orders en bestellingen worden niet aangeraakt.
+
+Voor toekomstige QR-automatisering: gebruik de IPN als stabiele externe sleutel,
+zoek daarmee de Part en vervolgens supplier + SKU om de SupplierPart-PK te vinden.
+Een lege SKU blokkeert bestellen. Een set jumperdraden telt als één cataloguseenheid;
+het aantal draden in die set is niet de SupplierPart-pack_quantity.
+De koppeling met Pending Purchase Orders valt buiten deze importer.
+
+Bronnen, verpakking en openstaande gegevens: [verificatierapport](docs/component_verification.md).
