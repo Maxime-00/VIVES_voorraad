@@ -76,3 +76,67 @@ het aantal draden in die set is niet de SupplierPart-pack_quantity.
 De koppeling met Pending Purchase Orders valt buiten deze importer.
 
 Bronnen, verpakking en openstaande gegevens: [verificatierapport](docs/component_verification.md).
+
+## InvenTree-server (Docker)
+
+De InvenTree-server zelf draait op de Ubuntu-VM (`10.20.225.77`) als Docker-stack
+(zie `docker-compose.yml`). De componenten:
+
+| Dienst             | Image                        | Functie                                   |
+| ------------------ | ---------------------------- | ----------------------------------------- |
+| `inventree-db`     | `postgres:16`                | Database                                  |
+| `inventree-cache`  | `redis:7-alpine`             | Cache                                     |
+| `inventree-server` | `inventree/inventree:stable` | Webserver (intern op poort 8000)          |
+| `inventree-worker` | `inventree/inventree:stable` | Achtergrondtaken (`invoke worker`)        |
+| `inventree-proxy`  | `caddy:2-alpine`             | Reverse proxy; publiceert poort **8000**  |
+
+Poortstructuur: apparaten op het lokaal netwerk bereiken de server op
+`http://10.20.225.77:8000`. Caddy publiceert hostpoort 8000 en stuurt verkeer
+door naar de webserver (intern poort 8000); `/static/*` en `/media/*` worden
+door Caddy rechtstreeks geserveerd (zie `Caddyfile`). De firewall van de VM
+moet poort 8000 openzetten voor lokaal netwerkverkeer.
+
+Opstarten op de VM:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Alle persistente data (database, media, static) staat in het volume
+`/opt/inventree/data` (`INVENTREE_EXT_VOLUME` in `.env`).
+
+De Base URL in InvenTree (`INVENTREE_BASE_URL` onder Instellingen) volgt
+automatisch `INVENTREE_SITE_URL` uit `.env` en is daardoor read-only. Om de
+URL te veranderen: `INVENTREE_SITE_URL` aanpassen in `.env` en daarna
+`docker compose up -d` draaien.
+
+## QR-bestel-app (inventree_qr_api.py)
+
+Naast de importer bevat dit project een kleine Flask-app (`inventree_qr_api.py`)
+voor het bestellen via QR-code op het telefoon. De app luistert op
+`0.0.0.0:5000`:
+
+- `GET /bestel/<part_id>` — zoekt de SupplierPart van het onderdeel op en
+  verhoogt het aantal van de bestaande regel met 1 op de openstaande
+  bestellijst (PO), of voegt een nieuwe regel toe met aantal 1. Retourneert
+  een compacte HTML-statusmelding voor het telefoonscherm.
+- `GET /health` — snelle controle of de app draait.
+
+De app leest dezelfde `INVENTREE_SITE_URL` en `INVENTREE_API_TOKEN` uit `.env`,
+plus `OPEN_PO_ID` (id van de openstaande bestellijst, standaard `1`).
+Aanroepen worden gelogd in `bestellingen.log`.
+
+In tegenstelling tot de import-componenten (puur Python-standaardbibliotheek)
+heeft deze app wél externe packages nodig. `requirements.txt` bevat die
+niet; installeer ze handmatig:
+
+```bash
+python -m pip install flask requests python-dotenv
+```
+
+Draaien van de app:
+
+```bash
+python inventree_qr_api.py
+```
