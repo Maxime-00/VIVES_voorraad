@@ -1,4 +1,7 @@
 import copy
+import json
+import io
+from contextlib import redirect_stdout
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -6,7 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from qr_order.app import Settings, Orders, create_app, verify_schema
+from qr_order.app import Settings, Orders, Client, create_app, verify_schema
+from scripts.import_components import API, ImportFailure
 
 
 class MockInvenTree:
@@ -57,6 +61,34 @@ class QRTests(unittest.TestCase):
     def test_authentication_required(self):
         self.assertEqual(self.client.get(self.url).status_code, 401)
         self.assertEqual(self.client.post(self.url + '/aanvragen').status_code, 401)
+
+    def test_health_is_public_and_read_only(self):
+        self.assertEqual(self.client.get('/healthz').json(), {'status': 'ok', 'dry_run': True})
+        self.assertFalse(self.api.posts)
+
+    def test_transport_blocks_all_writes_in_dry_run(self):
+        client = Client('https://example.org', 'test-token')
+        with patch.object(API, 'request') as network:
+            for method in ('POST', 'PATCH', 'PUT', 'DELETE'):
+                with self.assertRaises(ImportFailure):
+                    client.request(method, 'order/po-line/', {})
+            network.assert_not_called()
+
+    def test_http_chain_uses_only_inventree_gets(self):
+        calls = []
+        def upstream(api, method, path, payload=None):
+            calls.append((method, path))
+            if path == '' or path == 'order/po/1/':
+                return self.api.request(method, path, payload)
+            return {'results': self.api.rows(path), 'next': None}
+        with patch.object(API, 'request', upstream):
+            browser = TestClient(create_app(self.settings, Client('https://example.org', 'test-token')))
+            self.assertEqual(browser.get('/onderdeel/B303-002', auth=self.auth).status_code, 200)
+            self.assertEqual(browser.get(self.url, auth=self.auth).json()['sku'], '9339051')
+            self.assertEqual(browser.post(self.url + '/aanvragen', auth=self.auth,
+                                         headers={'X-QR-Confirm': 'yes'}).json()['state'], 'dry-run')
+        self.assertTrue(calls)
+        self.assertTrue(all(method == 'GET' for method, _ in calls))
 
     def test_scan_and_details_never_write(self):
         self.assertEqual(self.client.get('/onderdeel/B303-002', auth=self.auth).status_code, 200)
@@ -114,6 +146,24 @@ class QRTests(unittest.TestCase):
         file.write_text('{}')
         with self.assertRaises(HTTPException):
             verify_schema(file)
+
+    def test_vm_check_contract_and_snapshot_with_mock_api(self):
+        from scripts.qr_vm_check import check
+        paths = {path: {'get': {}} for path in ('/api/order/po/{id}/', '/api/order/po-line/',
+                 '/api/part/', '/api/company/part/', '/api/company/')}
+        paths['/api/order/po-line/']['post'] = {'requestBody': {'content': {'application/json': {
+            'schema': {'properties': {key: {'type': value} for key, value in {
+                'order': 'integer', 'part': 'integer', 'quantity': 'number', 'merge_items': 'boolean'}.items()}}}}}}
+        original = self.api.request
+        def request(method, path, payload=None):
+            if path == 'schema/?format=json':
+                self.assertEqual(method, 'GET')
+                return {'openapi': '3.0.3', 'paths': paths}
+            return original(method, path, payload)
+        with patch.object(self.api, 'request', request), redirect_stdout(io.StringIO()) as output:
+            check(self.settings, self.api)
+        self.assertIn('PO-snapshot ongewijzigd', output.getvalue())
+        self.assertFalse(self.api.posts)
 
 
 if __name__ == '__main__':

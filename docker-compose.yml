@@ -1,4 +1,65 @@
+volumes:
+  qr-state:
+  qr-caddy-data:
+  qr-caddy-config:
+
 services:
+  qr-web:
+    profiles: [qr-dry-run]
+    build:
+      context: .
+      dockerfile: Dockerfile.qr
+    restart: unless-stopped
+    environment:
+      INVENTREE_SITE_URL: http://inventree-server:8000
+      INVENTREE_API_TOKEN: ${INVENTREE_API_TOKEN:-}
+      QR_USERNAME: ${QR_USERNAME:-}
+      QR_PASSWORD: ${QR_PASSWORD:-}
+      OPEN_PO_ID: "1"
+      QR_QUANTITY: "10"
+      # Intentionally fixed; root .env cannot enable live writes.
+      QR_DRY_RUN: "true"
+      QR_DATABASE: /state/qr_requests.sqlite3
+    volumes:
+      - qr-state:/state
+    expose: ["8080"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "3"}
+
+  qr-proxy:
+    profiles: [qr-dry-run]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${QR_BIND_IP:-10.20.225.77}:8443:8443"
+    environment:
+      QR_BIND_IP: ${QR_BIND_IP:-10.20.225.77}
+    volumes:
+      - ./deploy/Caddyfile.qr:/etc/caddy/Caddyfile:ro
+      - qr-caddy-data:/data
+      - qr-caddy-config:/config
+    depends_on:
+      qr-web: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "3"}
+
   # PostgreSQL Database
   inventree-db:
     image: postgres:16

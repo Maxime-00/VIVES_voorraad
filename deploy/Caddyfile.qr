@@ -1,0 +1,9 @@
+{
+    auto_https disable_redirects
+}
+
+https://{$QR_BIND_IP}:8443 {
+    tls internal
+    encode gzip
+    reverse_proxy qr-web:8080
+}

@@ -1,7 +1,8 @@
 # QR-aanvragen B303
 
 Deze afzonderlijke FastAPI-app vervangt voor nieuwe QR-codes de oude Flask-flow.
-De bestaande `inventree_qr_api.py`, Docker Compose en Caddyfile zijn niet gewijzigd.
+De bestaande `inventree_qr_api.py` en Caddyfile zijn niet gewijzigd. De optionele
+Docker-dry-runservices en HTTPS-procedure staan in [VM-dry-run](qr_vm_dry_run.md).
 **De oude `/bestel/<id>`-route schrijft bij GET. Publiceer die niet voor deze flow.**
 
 ## Lokaal starten
@@ -28,7 +29,7 @@ controleer bestelvoorwaarden voor andere artikelen vóór live gebruik.
 ## QR-code
 
 `data/b303-002-qr.png` verwijst naar
-`http://localhost:8080/onderdeel/B303-002` voor de lokale demonstratie.
+`https://10.20.225.77:8443/onderdeel/B303-002` voor de voorbereide VM-dry-run.
 Voor een telefoon moet de definitieve bereikbare HTTPS-app-URL worden ingevuld:
 
 ```bash

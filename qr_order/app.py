@@ -16,7 +16,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from scripts.import_components import API, ImportFailure, ROOT, load_env
 
-log = logging.getLogger('qr_order')
+log = logging.getLogger('uvicorn.error.qr_order')
 
 
 @dataclass
@@ -47,6 +47,15 @@ class Settings:
 
 
 class Client(API):
+    def __init__(self, url, token, read_only=True):
+        super().__init__(url, token)
+        self.read_only = read_only
+
+    def request(self, method, path, payload=None):
+        if self.read_only and method != 'GET':
+            raise ImportFailure('Dry-run blokkeert schrijvende API-aanroep')
+        return super().request(method, path, payload)
+
     def rows(self, path):
         records, seen = [], set()
         while path:
@@ -128,6 +137,7 @@ class Orders:
         if any(line.get('order') == self.settings.po and (line.get('part') == link['pk'] or line.get('internal_part') == part['pk']) for line in lines):
             return {'message': 'Dit onderdeel staat al op de bestellijst.', 'state': 'existing'}
         if self.settings.dry_run:
+            log.info('QR dry-run voltooid; geen InvenTree-wijzigingen')
             return {'message': 'Dry-run geslaagd. Er is geen bestelregel toegevoegd.', 'state': 'dry-run', 'quantity': self.settings.quantity}
         verify_schema(self.settings.schema)
         # Persist intent BEFORE the network call. A timeout must never trigger a second POST.
@@ -153,9 +163,13 @@ class Orders:
 
 def create_app(settings=None, client=None):
     settings = settings or Settings.from_env()
-    orders = Orders(settings, client or Client(settings.url, settings.token))
+    orders = Orders(settings, client or Client(settings.url, settings.token, read_only=settings.dry_run))
     app = FastAPI(title='VIVES Aanvullen', docs_url=None, redoc_url=None, openapi_url=None)
     security = HTTPBasic()
+
+    @app.get('/healthz')
+    def health():
+        return {'status': 'ok', 'dry_run': settings.dry_run}
 
     def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
         user_ok = hmac.compare_digest(credentials.username.encode(), settings.username.encode())

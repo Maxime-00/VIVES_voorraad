@@ -1,0 +1,11 @@
+FROM python:3.13-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements-qr.txt .
+RUN pip install --no-cache-dir -r requirements-qr.txt && useradd --uid 10001 --create-home qr && mkdir /state && chown qr:qr /state
+COPY scripts/import_components.py scripts/import_components.py
+COPY scripts/qr_vm_check.py scripts/qr_vm_check.py
+COPY qr_order/ qr_order/
+USER qr
+EXPOSE 8080
+CMD ["python", "-m", "uvicorn", "qr_order.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--no-proxy-headers"]

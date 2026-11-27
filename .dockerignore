@@ -1,0 +1,9 @@
+**
+!Dockerfile.qr
+!requirements-qr.txt
+!scripts/
+!scripts/import_components.py
+!scripts/qr_vm_check.py
+!qr_order/
+!qr_order/*.py
+!qr_order/*.html
