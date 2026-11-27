@@ -1,0 +1,1 @@
+# Python >= 3.10; runtime en tests gebruiken uitsluitend de standaardbibliotheek.
