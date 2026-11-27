@@ -4,5 +4,7 @@
 __pycache__/
 *.py[cod]
 .venv/
-venv
-authentik/redis
+venv/
+data/
+certs/
+custom-templates/
