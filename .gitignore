@@ -5,5 +5,8 @@ __pycache__/
 *.py[cod]
 .venv/
 runtime/
-venv
+venv/
 authentik/redis
+data/
+certs/
+custom-templates/
